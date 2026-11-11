@@ -39,21 +39,27 @@ button{font:inherit}
 .chips button:hover{color:#fff}
 .chips button.on{background:var(--accent2);color:#fff}
 .banner{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:8px 16px;background:#1c2440;font-size:.85rem}
-.track{flex:1;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;display:flex;align-items:center;scrollbar-width:thin}
-.stage{position:relative;height:560px;flex-shrink:0}
-.axis{position:absolute;left:0;right:0;top:280px;height:2px;background:#2b313c}
-.ymark{position:absolute;top:262px;transform:translateX(-50%);font-family:var(--display);font-weight:700;font-size:1.1rem;background:var(--bg);color:var(--ink);padding:4px 10px;border:1px solid #2b313c;border-radius:999px;cursor:pointer;z-index:2}
+.track{flex:1;overflow:auto;overscroll-behavior:contain;display:flex;scrollbar-width:thin;cursor:grab;user-select:none}
+.track.dragging,.track.dragging *{cursor:grabbing!important}
+/* Alle Grössen hängen an --z (Zoom). Texthöhe bleibt fest, damit die Schrift lesbar bleibt. */
+.stage{--z:1;--cov:calc(var(--z) * 124px + 2px);--cardh:calc(var(--cov) + 82px);--ax:calc(var(--cardh) + 58px);position:relative;height:calc(2 * var(--ax));flex-shrink:0;margin-block:auto}
+.axis{position:absolute;left:0;right:0;top:var(--ax);height:2px;background:#2b313c}
+.ymark{position:absolute;top:calc(var(--ax) - 18px);transform:translateX(-50%);font-family:var(--display);font-weight:700;font-size:1.1rem;background:var(--bg);color:var(--ink);padding:4px 10px;border:1px solid #2b313c;border-radius:999px;cursor:pointer;z-index:2}
 .ymark:hover{border-color:var(--accent)}
-.stem{position:absolute;width:2px;height:34px;background:#2b313c}
-.dot{position:absolute;top:275px;width:12px;height:12px;border-radius:50%;background:var(--accent);transform:translateX(-50%);box-shadow:0 0 0 4px var(--bg)}
+.stem{position:absolute;width:2px;height:34px;background:#2b313c;margin-left:-1px}
+.stem.up{top:calc(var(--ax) - 34px)}.stem.down{top:var(--ax)}
+.dot{position:absolute;top:calc(var(--ax) - 5px);width:12px;height:12px;border-radius:50%;background:var(--accent);transform:translateX(-50%);box-shadow:0 0 0 4px var(--bg)}
 .dot.alltag{background:#4a5263}
-.card{position:absolute;width:236px;height:206px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;transition:transform .18s,border-color .18s}
+.card{position:absolute;width:calc(var(--z) * 236px);height:var(--cardh);background:var(--bg2);border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;transition:transform .18s,border-color .18s}
 .card:hover{border-color:#3d4656;transform:translateY(-2px)}
 .card.alltag{background:#13161c}
-.card .cov{display:grid;grid-template-columns:2fr 1fr;grid-template-rows:62px 62px;gap:2px}
+.card.up{top:24px}.card.down{top:calc(var(--ax) + 34px)}
+.card .cov{display:grid;grid-template-columns:2fr 1fr;grid-template-rows:repeat(2,calc(var(--z) * 62px));gap:2px}
 .card .cov .tile:first-child{grid-row:span 2}
 .card .cov.n1{grid-template-columns:1fr}.card .cov.n1 .tile,.card .cov.n2 .tile{grid-row:span 2}.card .cov.n2{grid-template-columns:1fr 1fr}
-.card .txt{padding:9px 11px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.card .txt>*{flex-shrink:0}
+.card .c{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .txt{height:82px;overflow:hidden;padding:9px 11px;display:flex;flex-direction:column;gap:1px;min-width:0}
 .card b{font-family:var(--display);font-size:.98rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card .d{font-size:.74rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card .c{font-family:var(--mono);font-size:.68rem;color:var(--muted);margin-top:2px}
@@ -90,7 +96,7 @@ button{font:inherit}
 .dgroup{display:flex;flex-direction:column;gap:8px;scroll-margin-top:10px}
 .dgroup h3{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:1rem}
 .dgroup h3 span{font-family:var(--body);font-weight:400;font-size:.78rem;color:var(--muted)}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:3px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--tile,130px),1fr));gap:3px}
 .grid .tile{aspect-ratio:1;cursor:pointer}
 .hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .hd .btn{margin-left:auto}
@@ -109,7 +115,7 @@ button{font:inherit}
 .lb-path{font-family:var(--mono);font-size:.7rem;color:var(--muted);padding:6px 16px 12px;user-select:all;overflow-wrap:anywhere}
 
 /* Einstellungen */
-.settings{background:var(--bg2);color:var(--ink);border:1px solid var(--line);border-radius:12px;width:min(560px,calc(100% - 32px));padding:20px}
+.settings{background:var(--bg2);color:var(--ink);border:1px solid var(--line);border-radius:12px;width:min(620px,calc(100% - 32px));max-height:calc(100% - 32px);padding:20px}
 .settings::backdrop{background:rgba(0,0,0,.6)}
 .settings form{display:flex;flex-direction:column;gap:14px}
 .settings fieldset{border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;gap:10px;padding:12px}
@@ -117,6 +123,16 @@ button{font:inherit}
 .settings label{font-size:.88rem}
 .settings input[type=number]{width:64px;font:inherit;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:5px;padding:2px 6px}
 .settings .check{display:flex;gap:8px;align-items:center}
+.tree{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--bg)}
+.tree details>summary{list-style:none;cursor:pointer;display:flex;align-items:center}
+.tree details>summary::before{content:"▸";width:16px;color:var(--muted);flex-shrink:0}
+.tree details[open]>summary::before{content:"▾"}
+.tree .fleaf{padding-left:16px}
+.tree .fkids{padding-left:18px}
+.fnode{display:flex;gap:8px;align-items:center;padding:2px 0;font-size:.85rem;min-width:0}
+.fnode span:first-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fnode .meta{margin-left:auto;padding-left:10px}
+.fnode.inherited{opacity:.45}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .row.end{justify-content:flex-end}
 @media (prefers-reduced-motion:reduce){.card{transition:none}}

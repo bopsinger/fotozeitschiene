@@ -8,7 +8,7 @@ const App = (() => {
   const dur = s => s == null ? '' : Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');
   const DAY = 86400e3;
   const S = {
-    files: [], events: [], set: { gapH: 8, minSize: 12, awayKm: 40, hideShots: true }, titles: {},
+    files: [], events: [], set: { gapH: 8, minSize: 12, awayKm: 40, hideShots: true, excluded: [] }, titles: {},
     dir: null, handles: new Map(), raw: new Map(), readable: false, regT: [], regD: [], cur: [], li: 0, first: true, curEvent: null
   };
   const supported = 'showDirectoryPicker' in window;
@@ -34,6 +34,33 @@ const App = (() => {
     await Promise.all(Array.from({ length: n }, async () => { while (i < arr.length) { const k = i++; await fn(arr[k], k); } }));
   }
 
+  /* ---------- Ausgeschlossene Unterordner ---------- */
+  function isExcluded(folder) { return !!folder && S.set.excluded.some(x => folder === x || folder.startsWith(x + '/')); }
+  function folderTreeHTML() {
+    const count = new Map(), kids = new Map([['', new Set()]]);
+    const add = (p, n) => { while (p) { count.set(p, (count.get(p) || 0) + n); const par = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''; if (!kids.has(par)) kids.set(par, new Set()); kids.get(par).add(p); p = par; } };
+    S.files.forEach(f => add(f.folder, 1));
+    S.set.excluded.forEach(x => add(x, 0));
+    const sort = a => [...a].sort((x, y) => x.localeCompare(y, 'de', { numeric: true, sensitivity: 'base' }));
+    const node = p => {
+      const name = p.slice(p.lastIndexOf('/') + 1), ex = S.set.excluded.includes(p), ch = kids.get(p);
+      const lab = `<label class="fnode"><input type="checkbox" data-f="${esc(p)}"${ex ? '' : ' checked'}><span>${esc(name)}</span><span class="meta">${ex ? 'ausgeschlossen' : fmt(count.get(p) || 0)}</span></label>`;
+      return ch && ch.size ? `<details><summary>${lab}</summary><div class="fkids">${sort(ch).map(node).join('')}</div></details>` : `<div class="fleaf">${lab}</div>`;
+    };
+    const top = sort(kids.get(''));
+    return top.length ? top.map(node).join('') : '<p class="meta">Keine Unterordner.</p>';
+  }
+  function markTree() {
+    $('sTree').querySelectorAll('input[data-f]').forEach(b => {
+      const p = b.dataset.f, off = [...$('sTree').querySelectorAll('input[data-f]')].some(o => !o.checked && p.startsWith(o.dataset.f + '/'));
+      b.closest('label').classList.toggle('inherited', off);
+    });
+  }
+  function readExcluded() {
+    const off = [...$('sTree').querySelectorAll('input[data-f]')].filter(b => !b.checked).map(b => b.dataset.f);
+    return off.filter(p => !off.some(o => p.startsWith(o + '/'))); // nur die obersten
+  }
+
   /* ---------- Fortschritt ---------- */
   function progress(title, done, total, text) {
     $('progress').hidden = false; $('pTitle').textContent = title;
@@ -46,14 +73,14 @@ const App = (() => {
   async function walk(dir, prefix, out) {
     for await (const [name, h] of dir.entries()) {
       if (name.startsWith('.') || name.startsWith('$') || name === 'System Volume Information') continue;
-      if (h.kind === 'directory') await walk(h, prefix + name + '/', out);
+      if (h.kind === 'directory') { if (!isExcluded(prefix + name)) await walk(h, prefix + name + '/', out); }
       else if (Meta.kindOf(name)) { out.push([prefix + name, h]); if (out.length % 250 === 0) progress('Ordner wird durchsucht', 0, 0, `${fmt(out.length)} Fotos und Videos gefunden`); }
     }
   }
   async function scan() {
     let entries = [];
     try {
-      if (S.raw.size) entries = [...S.raw].map(([p, f]) => [p, f]);
+      if (S.raw.size) entries = [...S.raw].filter(([p]) => !isExcluded(p.slice(0, Math.max(0, p.lastIndexOf('/'))))).map(([p, f]) => [p, f]);
       else { progress('Ordner wird durchsucht', 0, 0, 'Einen Moment …'); S.handles = new Map(); await walk(S.dir, '', entries); entries.forEach(([p, h]) => S.handles.set(p, h)); }
     } catch (e) { progressEnd(); return lostAccess(); }
     const known = new Map(S.files.map(f => [f.path, f])), next = [], changed = [];
@@ -102,7 +129,9 @@ const App = (() => {
   }
 
   /* ---------- Zeitschiene ---------- */
-  const STEP = 132, YGAP = 110, AX = 280;
+  const STEP = 132, YGAP = 110;
+  let Z = 1; // Zoomstufe der Zeitschiene; alle Positionen sind ungezoomt gespeichert
+  const zx = v => `calc(var(--z) * ${v}px)`;
   let pos = [], yPos = {}, io = null, ioD = null, y0 = 0, nM = 0;
   const monthIdx = t => { const d = new Date(t); return (d.getUTCFullYear() - y0) * 12 + d.getUTCMonth() + (d.getUTCDate() - 1) / 31; };
 
@@ -138,17 +167,17 @@ const App = (() => {
     let x = 90, lastY = null, html = '<div class="axis"></div>';
     S.events.forEach((e, i) => {
       const y = new Date(e.start).getUTCFullYear();
-      if (y !== lastY) { if (lastY !== null) x += YGAP - STEP / 2; yPos[y] = x; html += `<button class="ymark" type="button" data-y="${y}" style="left:${x}px">${y}</button>`; x += YGAP; lastY = y; }
+      if (y !== lastY) { if (lastY !== null) x += YGAP - STEP / 2; yPos[y] = x; html += `<button class="ymark" type="button" data-y="${y}" style="left:${zx(x)}">${y}</button>`; x += YGAP; lastY = y; }
       const up = i % 2 === 0, cv = covers(e), rest = e.items.length - cv.length;
       const tiles = cv.map((r, k) => tileHTML(r, S.regT).replace(/<\/div>$/, k === cv.length - 1 && rest > 0 ? `<span class="more">+${fmt(rest)}</span></div>` : '</div>')).join('');
       const cnt = [e.nImg ? pl(e.nImg, 'Foto', 'Fotos') : '', e.nVid ? pl(e.nVid, 'Video', 'Videos') : ''].filter(Boolean).join(' · ');
       const sub = Group.range(e) + (e.place && e.title !== e.place ? ' · ' + e.place : '');
-      html += `<div class="stem" style="left:${x - 1}px;top:${up ? AX - 34 : AX}px"></div><span class="dot${e.alltag ? ' alltag' : ''}" style="left:${x}px"></span>
-        <div class="card${e.alltag ? ' alltag' : ''}" role="button" tabindex="0" data-i="${i}" style="left:${x - 118}px;top:${up ? AX - 34 - 206 : AX + 34}px" aria-label="${esc(e.title)} öffnen">
+      html += `<div class="stem ${up ? 'up' : 'down'}" style="left:${zx(x)}"></div><span class="dot${e.alltag ? ' alltag' : ''}" style="left:${zx(x)}"></span>
+        <div class="card${e.alltag ? ' alltag' : ''} ${up ? 'up' : 'down'}" role="button" tabindex="0" data-i="${i}" style="left:${zx(x - 118)}" aria-label="${esc(e.title)} öffnen">
           <div class="cov n${cv.length}">${tiles}</div><div class="txt"><b title="${esc(e.title)}">${esc(e.title)}</b><span class="d">${esc(sub)}</span><span class="c">${cnt}</span></div></div>`;
       pos.push(x); x += STEP;
     });
-    stage.style.width = (x + 120) + 'px'; stage.innerHTML = html;
+    stage.style.width = zx(x + 120); stage.style.setProperty('--z', Z); stage.innerHTML = html;
     stage.querySelectorAll('.tile').forEach(t => io.observe(t));
     // Jahr-Knöpfe
     const years = Object.keys(yPos);
@@ -170,20 +199,74 @@ const App = (() => {
     return monthIdx(S.events[S.events.length - 1].end) + 0.5;
   }
   function timeAtCenter() {
-    const t = $('track'), c = t.scrollLeft + t.clientWidth / 2;
+    const t = $('track'), c = (t.scrollLeft + t.clientWidth / 2) / Z;
     for (let i = 0; i < pos.length; i++) if (pos[i] >= c) return S.events[i] ? S.events[i].start : null;
     return null;
   }
   function scrollToIdx(i, where) {
     const t = $('track'); if (i < 0 || !pos.length) return;
-    t.scrollLeft = where === 'end' ? t.scrollWidth : pos[i] - t.clientWidth / 2;
+    t.scrollLeft = where === 'end' ? t.scrollWidth : pos[i] * Z - t.clientWidth / 2;
   }
   function updWin() {
     const t = $('track'), win = $('win'); if (!nM || !pos.length) return;
-    const a = xToMonth(t.scrollLeft), b = xToMonth(t.scrollLeft + t.clientWidth);
+    const a = xToMonth(t.scrollLeft / Z), b = xToMonth((t.scrollLeft + t.clientWidth) / Z);
     win.style.left = (Math.max(0, a) / nM * 100) + '%'; win.style.width = Math.max(1.2, (b - a) / nM * 100) + '%';
     const c = timeAtCenter(), yc = c ? new Date(c).getUTCFullYear() : null;
     $('yearChips').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.y === yc));
+  }
+
+  /* ---------- Zoom ---------- */
+  let zoomSave = null;
+  function setZoom(nz, anchor) {
+    const t = $('track'); nz = Math.min(2.6, Math.max(0.4, nz)); if (Math.abs(nz - Z) < 1e-4) return;
+    const world = (t.scrollLeft + anchor) / Z;
+    Z = nz; $('stage').style.setProperty('--z', Z);
+    t.scrollLeft = world * Z - anchor; updWin();
+    clearTimeout(zoomSave); zoomSave = setTimeout(() => DB.put('meta', Z, 'zoom').catch(() => {}), 400);
+  }
+
+  /* ---------- Ziehen mit der linken Maustaste, mit Nachlauf ---------- */
+  let glide = 0, suppressClick = false;
+  function stopGlide() { cancelAnimationFrame(glide); glide = 0; }
+  function wireDrag(track) {
+    let d = null;
+    track.addEventListener('pointerdown', e => {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      stopGlide(); suppressClick = false;
+      d = { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, t: performance.now(), v: 0, moved: false, id: e.pointerId };
+      e.preventDefault(); // keine Textauswahl, kein Bild-Ziehen
+    });
+    track.addEventListener('pointermove', e => {
+      if (!d) return;
+      const now = performance.now(), dt = Math.max(1, now - d.t), dx = e.clientX - d.x, dy = e.clientY - d.y;
+      if (!d.moved) {
+        if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 5) return;
+        d.moved = true; track.setPointerCapture(d.id); track.classList.add('dragging');
+      }
+      // schnellere Bewegung = überproportional weiter
+      const speed = Math.abs(dx) / dt, gain = 1 + Math.min(3, Math.max(0, speed - 0.6) * 1.6);
+      const move = dx * gain;
+      track.scrollLeft -= move; track.scrollTop -= dy;
+      d.v = d.v * 0.5 + (-move / dt) * 0.5;
+      d.x = e.clientX; d.y = e.clientY; d.t = now;
+    });
+    const end = () => {
+      if (!d) return;
+      const was = d; d = null; track.classList.remove('dragging');
+      if (!was.moved) return;
+      suppressClick = true;
+      let v = performance.now() - was.t > 90 ? 0 : was.v; // Maus stand still vor dem Loslassen: kein Nachlauf
+      let last = performance.now(); const start = last;
+      const step = now => {
+        const dt = now - last; last = now;
+        track.scrollLeft += v * dt; v *= Math.exp(-dt / 280);
+        if (Math.abs(v) > 0.02 && now - start < 1400) glide = requestAnimationFrame(step); else glide = 0;
+      };
+      if (Math.abs(v) > 0.05) glide = requestAnimationFrame(step);
+    };
+    track.addEventListener('pointerup', end);
+    track.addEventListener('pointercancel', end);
+    track.addEventListener('click', e => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); suppressClick = false; } }, true);
   }
 
   /* ---------- Detailansicht ---------- */
@@ -269,6 +352,7 @@ const App = (() => {
   async function openSettings() {
     $('sGap').value = S.set.gapH; $('sMin').value = S.set.minSize; $('sAway').value = S.set.awayKm; $('sShots').checked = S.set.hideShots;
     $('sClearConfirm').hidden = true; $('sPick').hidden = !supported;
+    $('sTree').innerHTML = folderTreeHTML(); markTree();
     let info = `${fmt(S.files.length)} Dateien im Verzeichnis` + (S.dir ? ` · Ordner „${S.dir.name}“` : '');
     try { const est = await navigator.storage.estimate(); const per = navigator.storage.persisted ? await navigator.storage.persisted() : false; info += ` · Zwischenspeicher ${fmt(Math.round(est.usage / 1048576))} MB` + (per ? ' (dauerhaft)' : ' (der Browser darf ihn bei Platzmangel leeren)'); } catch (e) { /* ohne Angabe */ }
     $('sInfo').textContent = info;
@@ -276,8 +360,15 @@ const App = (() => {
   }
   async function saveSettings() {
     const n = (id, min, max, def) => { const v = Math.round(+$(id).value); return v >= min && v <= max ? v : def; };
-    S.set = { gapH: n('sGap', 1, 72, 8), minSize: n('sMin', 1, 100, 12), awayKm: n('sAway', 5, 1000, 40), hideShots: $('sShots').checked };
-    await DB.put('meta', S.set, 'settings'); rebuild();
+    const before = S.set.excluded, excluded = readExcluded();
+    S.set = { gapH: n('sGap', 1, 72, 8), minSize: n('sMin', 1, 100, 12), awayKm: n('sAway', 5, 1000, 40), hideShots: $('sShots').checked, excluded };
+    await DB.put('meta', S.set, 'settings');
+    const reIncluded = before.filter(x => !excluded.includes(x) && !isExcluded(x));
+    // neu ausgeschlossene Dateien sofort aus Verzeichnis und Vorschaubildern entfernen
+    const gone = S.files.filter(f => isExcluded(f.folder)).map(f => f.path);
+    if (gone.length) { const g = new Set(gone); S.files = S.files.filter(f => !g.has(f.path)); await DB.delMany('files', gone); await DB.delMany('thumbs', gone); Thumbs.forget(gone); }
+    rebuild();
+    if (reIncluded.length) { if (canRead()) scan(); else $('banner').hidden = false; }
   }
 
   /* ---------- Ereignisse verdrahten ---------- */
@@ -286,19 +377,25 @@ const App = (() => {
     $('fallback').onchange = e => { if (e.target.files.length) fromInput(e.target.files); };
     const track = $('track');
     track.addEventListener('scroll', updWin, { passive: true }); window.addEventListener('resize', updWin);
+    // Mausrad: Vorschauen vergrössern oder verkleinern, Punkt unter der Maus bleibt stehen
     track.addEventListener('wheel', ev => {
-      if (Math.abs(ev.deltaY) <= Math.abs(ev.deltaX)) return;
-      ev.preventDefault(); track.scrollLeft += ev.deltaY * (ev.deltaMode === 1 ? 40 : 1);
+      if (Math.abs(ev.deltaY) <= Math.abs(ev.deltaX) && !ev.ctrlKey) return; // seitliches Wischen auf dem Touchpad bleibt Verschieben
+      ev.preventDefault(); stopGlide();
+      const d = ev.deltaY * (ev.deltaMode === 1 ? 40 : 1);
+      setZoom(Z * Math.exp(-d * 0.0015), ev.clientX - track.getBoundingClientRect().left);
     }, { passive: false });
+    wireDrag(track);
     $('stage').addEventListener('click', ev => {
       const c = ev.target.closest('.card'); if (c) return openEvent(+c.dataset.i);
       const y = ev.target.closest('.ymark'); if (y) openYear(y.dataset.y);
     });
-    $('yearChips').addEventListener('click', ev => { const b = ev.target.closest('button'); if (b) { track.scrollLeft = yPos[b.dataset.y] - 40; } });
+    $('yearChips').addEventListener('click', ev => { const b = ev.target.closest('button'); if (b) { stopGlide(); track.scrollTo({ left: yPos[b.dataset.y] * Z - 40, behavior: 'smooth' }); } });
     $('histo').addEventListener('click', ev => {
       const r = $('histo').getBoundingClientRect(), m = (ev.clientX - r.left) / r.width * nM;
       let i = S.events.findIndex(e => monthIdx(e.end) >= m); if (i < 0) i = S.events.length - 1; scrollToIdx(i, 'center');
     });
+    let tileW = 130;
+    $('lbody').addEventListener('wheel', ev => { if (!ev.ctrlKey) return; ev.preventDefault(); tileW = Math.min(420, Math.max(70, tileW * Math.exp(-ev.deltaY * 0.0015))); $('lbody').style.setProperty('--tile', tileW + 'px'); }, { passive: false });
     $('back').onclick = closeLayer; $('rename').onclick = startRename;
     $('lEdit').addEventListener('keydown', e => { if (e.key === 'Enter') endRename(true); if (e.key === 'Escape') { e.stopPropagation(); endRename(false); } });
     $('lEdit').addEventListener('blur', () => endRename(true));
@@ -309,7 +406,7 @@ const App = (() => {
       if (ev.key === 'Enter' && ev.target.matches && ev.target.matches('.card,[data-c]')) { ev.target.click(); return; }
       if (!$('lb').hidden) { if (ev.key === 'Escape') closeLB(); else if (ev.key === 'ArrowRight') stepLB(1); else if (ev.key === 'ArrowLeft') stepLB(-1); return; }
       if (!$('layer').hidden) { if (ev.key === 'Escape') closeLayer(); return; }
-      if (!$('app').hidden && $('settings').open === false) { if (ev.key === 'ArrowRight') track.scrollLeft += 400; if (ev.key === 'ArrowLeft') track.scrollLeft -= 400; }
+      if (!$('app').hidden && $('settings').open === false) { if (ev.key === 'ArrowRight') track.scrollBy({ left: 400, behavior: 'smooth' }); if (ev.key === 'ArrowLeft') track.scrollBy({ left: -400, behavior: 'smooth' }); if (ev.key === '+') setZoom(Z * 1.15, track.clientWidth / 2); if (ev.key === '-') setZoom(Z / 1.15, track.clientWidth / 2); }
     });
     $('openSettings').onclick = openSettings;
     $('settings').addEventListener('close', () => { if ($('settings').returnValue === 'save') saveSettings(); });
@@ -317,6 +414,8 @@ const App = (() => {
     $('sThumbs').onclick = () => { if (Thumbs.state().on) Thumbs.stop(); else startThumbs(); };
     $('sPick').onclick = () => { $('settings').close(); pick(); };
     $('sClear').onclick = () => { $('sClearConfirm').hidden = false; };
+    $('sTree').addEventListener('change', markTree);
+    $('sAll').onclick = () => { $('sTree').querySelectorAll('input[data-f]').forEach(b => { b.checked = true; }); markTree(); };
     $('sClearYes').onclick = async () => { Thumbs.stop(); await Promise.all(['files', 'thumbs', 'meta'].map(s => DB.clear(s))); location.reload(); };
   }
   function showApp() { $('start').hidden = true; $('app').hidden = false; }
@@ -331,6 +430,7 @@ const App = (() => {
     }
     await Promise.all([Geo.load(), Thumbs.init()]);
     const set = await DB.get('meta', 'settings'); if (set) Object.assign(S.set, set);
+    const z = await DB.get('meta', 'zoom'); if (z) Z = z;
     S.titles = (await DB.get('meta', 'titles')) || {};
     S.files = await DB.getAll('files');
     const dir = supported ? await DB.get('meta', 'dir') : null;
