@@ -136,3 +136,25 @@ button{font:inherit}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .row.end{justify-content:flex-end}
 @media (prefers-reduced-motion:reduce){.card{transition:none}}
+
+/* Ordner */
+.lfolders{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.lfolders:empty{display:none}
+.fchip{all:unset;cursor:pointer;font-size:.74rem;padding:2px 9px;border-radius:999px;background:var(--bg2);border:1px solid var(--line);color:var(--ink);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fchip:hover{border-color:var(--accent)}
+.cfolder{position:absolute;top:6px;right:6px;z-index:3;font-size:.68rem;padding:2px 8px;border-radius:999px;background:rgba(10,12,16,.75);color:#fff;border:1px solid rgba(255,255,255,.25);cursor:pointer}
+.cfolder:hover{border-color:var(--accent)}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.fcard{all:unset;cursor:pointer;display:flex;gap:10px;align-items:center;background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:6px;min-width:0}
+.fcard:hover{border-color:#3d4656}
+.fcard .tile{width:64px;height:64px;flex-shrink:0;border-radius:5px}
+.fcard .ft{display:flex;flex-direction:column;min-width:0;font-size:.78rem;color:var(--muted)}
+.fcard .ft>*{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fcard b{color:var(--ink);font-size:.9rem}
+/* Zoom in der Grossansicht */
+.lb-media{overflow:hidden}
+.lb-media img{transform-origin:center center;user-select:none}
+.lb-media.zoomed{cursor:grab}
+.lb-media.panning{cursor:grabbing}
+.lb-path{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.lb-path span{user-select:all}

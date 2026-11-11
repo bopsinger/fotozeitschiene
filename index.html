@@ -43,6 +43,7 @@
     <span class="spacer"></span>
     <span class="meta" id="thumbProg"></span>
     <div class="chips" id="yearChips" aria-label="Zu Jahr springen"></div>
+    <button class="btn" id="openFolders" type="button">Ordner</button>
     <button class="btn" id="openSettings" type="button" aria-label="Einstellungen">Einstellungen</button>
   </header>
   <div id="banner" class="banner" hidden>
@@ -73,6 +74,7 @@
       <h2 id="lTitle"></h2>
       <input id="lEdit" type="text" maxlength="80" hidden aria-label="Titel">
       <span class="sub" id="lSub"></span>
+      <div class="lfolders" id="lFolders"></div>
     </div>
     <span class="spacer"></span>
     <button class="btn" id="rename" type="button">Umbenennen</button>
@@ -86,6 +88,9 @@
   <div class="lb-top">
     <button class="btn" id="lbClose" type="button">✕ Schliessen</button>
     <span class="lb-info" id="lbInfo"></span>
+    <span class="spacer"></span>
+    <span class="lb-info" id="lbZoom"></span>
+    <span class="lb-info">Mausrad: zoomen · Doppelklick: 250 % · Ziehen: verschieben</span>
   </div>
   <div class="lb-main">
     <button class="lb-nav" id="lbPrev" type="button" aria-label="Vorheriges">‹</button>

@@ -174,7 +174,7 @@ const App = (() => {
       const sub = Group.range(e) + (e.place && e.title !== e.place ? ' · ' + e.place : '');
       html += `<div class="stem ${up ? 'up' : 'down'}" style="left:${zx(x)}"></div><span class="dot${e.alltag ? ' alltag' : ''}" style="left:${zx(x)}"></span>
         <div class="card${e.alltag ? ' alltag' : ''} ${up ? 'up' : 'down'}" role="button" tabindex="0" data-i="${i}" style="left:${zx(x - 118)}" aria-label="${esc(e.title)} öffnen">
-          <div class="cov n${cv.length}">${tiles}</div><div class="txt"><b title="${esc(e.title)}">${esc(e.title)}</b><span class="d">${esc(sub)}</span><span class="c">${cnt}</span></div></div>`;
+          ${e.folderTitle ? `<span class="cfolder" role="button" tabindex="0" data-cf="${i}" title="Ganzen Ordner öffnen">Ordner</span>` : ''}<div class="cov n${cv.length}">${tiles}</div><div class="txt"><b title="${esc(e.title)}">${esc(e.title)}</b><span class="d">${esc(sub)}</span><span class="c">${cnt}</span></div></div>`;
       pos.push(x); x += STEP;
     });
     stage.style.width = zx(x + 120); stage.style.setProperty('--z', Z); stage.innerHTML = html;
@@ -269,42 +269,104 @@ const App = (() => {
     track.addEventListener('click', e => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); suppressClick = false; } }, true);
   }
 
+  /* ---------- Navigation über den Browserverlauf ----------
+     Jede geöffnete Ansicht ist ein Eintrag im Verlauf. Damit funktionieren die Zurück-Taste
+     der Maus, Alt+Pfeil links und der Zurück-Knopf des Browsers ohne eigene Einstellung. */
+  let view = null; // { t: 'event'|'year'|'folder'|'folders', ... }
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  function go(v) { history.pushState({ v }, ''); showView(v); }
+  function back() { if (history.state) history.back(); else { closeLB(); hideLayer(); } }
+  window.addEventListener('popstate', e => {
+    const st = e.state || {};
+    if (!st.lb && !$('lb').hidden) closeLB();
+    if (!same(st.v || null, view)) showView(st.v || null);
+  });
+  function showView(v) {
+    view = v; endRename(false);
+    if (!v) return hideLayer();
+    if (v.t === 'event') { const i = S.events.findIndex(e => e.id === v.id); return i < 0 ? hideLayer() : renderEvent(i); }
+    if (v.t === 'year') return renderYear(v.y);
+    if (v.t === 'folder') return renderFolder(v.f);
+    if (v.t === 'folders') return renderFolders();
+  }
+  function hideLayer() { view = null; $('layer').hidden = true; }
+  const openEvent = i => go({ t: 'event', id: S.events[i].id });
+  const openYear = y => go({ t: 'year', y: +y });
+  const openFolder = f => go({ t: 'folder', f });
+
   /* ---------- Detailansicht ---------- */
+  const visible = () => S.events.flatMap(e => e.items);
   function openLayer() {
     $('layer').hidden = false; $('lbody').scrollTop = 0; $('back').focus();
     if (ioD) ioD.disconnect();
     ioD = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { ioD.unobserve(e.target); loadTile(e.target, S.regD); } }), { root: $('lbody'), rootMargin: '600px 0px' });
     $('lbody').querySelectorAll('.tile').forEach(t => ioD.observe(t));
   }
-  function openEvent(i) {
-    const e = S.events[i]; S.curEvent = e; S.regD = []; S.cur = [];
-    $('lTitle').textContent = e.title; $('rename').hidden = false;
-    $('lSub').textContent = [Group.range(e), e.place ? e.place + (e.cc && e.cc !== 'CH' ? ', ' + Geo.country(e.cc) : '') : '', e.nImg ? pl(e.nImg, 'Foto', 'Fotos') : '', e.nVid ? pl(e.nVid, 'Video', 'Videos') : ''].filter(Boolean).join(' · ');
-    const days = new Map();
-    e.items.forEach(it => { const k = Math.floor(it.t / DAY); if (!days.has(k)) days.set(k, []); days.get(k).push(it); });
+  const tileAttrs = (r, c) => `data-c="${c}" tabindex="0" role="button" aria-label="${r.kind === 'vid' ? 'Video' : 'Foto'} öffnen"`;
+  /* Dateien nach Tagen gliedern, bei langen Zeiträumen nach Monaten */
+  function renderItems(items) {
+    const sorted = [...items].sort((a, b) => a.t - b.t);
+    const byMonth = sorted.length && sorted[sorted.length - 1].t - sorted[0].t > 60 * DAY;
+    const groups = new Map();
+    sorted.forEach(it => { const d = new Date(it.t), k = byMonth ? d.getUTCFullYear() * 12 + d.getUTCMonth() : Math.floor(it.t / DAY); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(it); });
     let bar = '', body = '';
-    for (const [k, list] of days) {
-      const d = new Date(k * DAY), lab = `${Group.WD[d.getUTCDay()].slice(0, 2)} ${d.getUTCDate()}. ${Group.MS[d.getUTCMonth()]}`;
-      bar += `<button type="button" data-d="${k}">${lab} · ${fmt(list.length)}</button>`;
-      body += `<div class="dgroup" id="day${k}"><h3>${Group.WD[d.getUTCDay()]}, ${d.getUTCDate()}. ${Group.MON[d.getUTCMonth()]} ${d.getUTCFullYear()}<span>${pl(list.length, 'Datei', 'Dateien')}</span></h3><div class="grid">${list.map(r => { const c = S.cur.push(r) - 1; return tileHTML(r, S.regD, `data-c="${c}" tabindex="0" role="button" aria-label="${r.kind === 'vid' ? 'Video' : 'Foto'} öffnen"`); }).join('')}</div></div>`;
+    for (const [k, list] of groups) {
+      const d = byMonth ? new Date(Date.UTC(Math.floor(k / 12), k % 12, 1)) : new Date(k * DAY);
+      const short = byMonth ? `${Group.MS[d.getUTCMonth()]} ${d.getUTCFullYear()}` : `${Group.WD[d.getUTCDay()].slice(0, 2)} ${d.getUTCDate()}. ${Group.MS[d.getUTCMonth()]}`;
+      const long = byMonth ? `${Group.MON[d.getUTCMonth()]} ${d.getUTCFullYear()}` : `${Group.WD[d.getUTCDay()]}, ${d.getUTCDate()}. ${Group.MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+      bar += `<button type="button" data-g="${k}">${short} · ${fmt(list.length)}</button>`;
+      body += `<div class="dgroup" id="g${k}"><h3>${long}<span>${pl(list.length, 'Datei', 'Dateien')}</span></h3><div class="grid">${list.map(r => tileHTML(r, S.regD, tileAttrs(r, S.cur.push(r) - 1))).join('')}</div></div>`;
     }
-    $('daybar').innerHTML = bar; $('daybar').hidden = days.size < 2; $('lbody').innerHTML = body;
+    $('daybar').innerHTML = bar; $('daybar').hidden = groups.size < 2; $('lbody').innerHTML = body;
+  }
+  function folderChips(items) {
+    const m = new Map(); items.forEach(i => m.set(i.folder, (m.get(i.folder) || 0) + 1));
+    const top = [...m].filter(([f]) => f).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    $('lFolders').innerHTML = top.map(([f, n]) => `<button type="button" class="fchip" data-folder="${esc(f)}" title="${esc(f)}">Ordner ${esc(f.slice(f.lastIndexOf('/') + 1))} · ${fmt(n)}</button>`).join('');
+  }
+  function head(title, sub, renameable) {
+    S.regD = []; S.cur = [];
+    $('lTitle').textContent = title; $('lSub').textContent = sub; $('rename').hidden = !renameable; $('lFolders').innerHTML = '';
+  }
+  function renderEvent(i) {
+    const e = S.events[i]; S.curEvent = e;
+    head(e.title, [Group.range(e), e.place ? e.place + (e.cc && e.cc !== 'CH' ? ', ' + Geo.country(e.cc) : '') : '', e.nImg ? pl(e.nImg, 'Foto', 'Fotos') : '', e.nVid ? pl(e.nVid, 'Video', 'Videos') : ''].filter(Boolean).join(' · '), true);
+    folderChips(e.items); renderItems(e.items); openLayer();
+  }
+  function renderFolder(f) {
+    S.curEvent = null;
+    const items = visible().filter(i => i.folder === f || i.folder.startsWith(f + '/'));
+    const subs = new Set(items.map(i => i.folder)).size > 1;
+    const span = items.length ? Group.range({ start: Math.min(...items.map(i => i.t)), end: Math.max(...items.map(i => i.t)) }) : '';
+    head(f.slice(f.lastIndexOf('/') + 1), [f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '', span, pl(items.length, 'Datei', 'Dateien'), subs ? 'inklusive Unterordner' : ''].filter(Boolean).join(' · '), false);
+    renderItems(items); openLayer();
+  }
+  function renderFolders() {
+    S.curEvent = null;
+    const m = new Map(); visible().forEach(i => { if (!i.folder) return; if (!m.has(i.folder)) m.set(i.folder, []); m.get(i.folder).push(i); });
+    const list = [...m].sort((a, b) => a[0].localeCompare(b[0], 'de', { numeric: true, sensitivity: 'base' }));
+    head('Ordner', `${fmt(list.length)} Ordner mit Fotos oder Videos`, false);
+    $('daybar').hidden = true;
+    $('lbody').innerHTML = `<div class="fgrid">${list.map(([f, its]) => {
+      const name = f.slice(f.lastIndexOf('/') + 1), parent = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '';
+      const a = Math.min(...its.map(i => i.t)), b = Math.max(...its.map(i => i.t));
+      const cover = its.find(i => i.kind === 'img') || its[0];
+      return `<button type="button" class="fcard" data-folder="${esc(f)}">${tileHTML(cover, S.regD)}<span class="ft"><b>${esc(name)}</b><span>${parent ? esc(parent) + ' · ' : ''}${esc(Group.range({ start: a, end: b }))}</span><span class="meta">${pl(its.length, 'Datei', 'Dateien')}</span></span></button>`;
+    }).join('')}</div>`;
     openLayer();
   }
-  function openYear(y) {
-    S.curEvent = null; S.regD = []; S.cur = [];
+  function renderYear(y) {
+    S.curEvent = null;
     const list = S.events.map((e, i) => [e, i]).filter(([e]) => new Date(e.start).getUTCFullYear() === +y);
     const n = list.reduce((a, [e]) => a + e.items.length, 0);
-    $('lTitle').textContent = `Jahr ${y}`; $('rename').hidden = true;
-    $('lSub').textContent = `${list.filter(([e]) => !e.alltag).length} Erlebnisse · ${fmt(n)} Dateien`;
+    head(`Jahr ${y}`, `${list.filter(([e]) => !e.alltag).length} Erlebnisse · ${fmt(n)} Dateien`, false);
     $('daybar').innerHTML = list.map(([e, i]) => `<button type="button" data-ev="${i}">${Group.MS[new Date(e.start).getUTCMonth()]} · ${esc(e.title)}</button>`).join(''); $('daybar').hidden = false;
     $('lbody').innerHTML = list.map(([e, i]) => {
       const its = e.items.length <= 12 ? e.items : Array.from({ length: 12 }, (_, k) => e.items[Math.floor(k * e.items.length / 12)]);
-      return `<div class="dgroup" id="ev${i}"><div class="hd"><h3>${esc(e.title)}<span>${esc(Group.range(e))}${e.place ? ' · ' + esc(e.place) : ''}</span></h3><button class="btn" type="button" data-open="${i}">Alle ${fmt(e.items.length)} ansehen →</button></div><div class="row12">${its.map(r => { const c = S.cur.push(r) - 1; return tileHTML(r, S.regD, `data-c="${c}" tabindex="0" role="button"`); }).join('')}</div></div>`;
+      return `<div class="dgroup" id="ev${i}"><div class="hd"><h3>${esc(e.title)}<span>${esc(Group.range(e))}${e.place ? ' · ' + esc(e.place) : ''}</span></h3><button class="btn" type="button" data-open="${i}">Alle ${fmt(e.items.length)} ansehen →</button></div><div class="row12">${its.map(r => tileHTML(r, S.regD, tileAttrs(r, S.cur.push(r) - 1))).join('')}</div></div>`;
     }).join('');
     openLayer();
   }
-  const closeLayer = () => { $('layer').hidden = true; endRename(false); };
   function startRename() {
     const inp = $('lEdit'); inp.value = S.curEvent.title; inp.hidden = false; $('lTitle').hidden = true; inp.focus(); inp.select();
   }
@@ -319,20 +381,37 @@ const App = (() => {
     const t = $('track').scrollLeft; renderTimeline(); $('track').scrollLeft = t;
   }
 
-  /* ---------- Grossansicht ---------- */
-  let lbUrl = null;
+  /* ---------- Grossansicht mit Zoom ---------- */
+  let lbUrl = null, zs = 1, tx = 0, ty = 0;
+  function applyZoom() {
+    const img = $('lbMedia').querySelector('img'); if (!img) return;
+    if (zs <= 1.001) { zs = 1; tx = 0; ty = 0; }
+    const lw = img.offsetWidth, lh = img.offsetHeight, mx = lw * (zs - 1) / 2 + 60, my = lh * (zs - 1) / 2 + 60;
+    tx = Math.max(-mx, Math.min(mx, tx)); ty = Math.max(-my, Math.min(my, ty));
+    img.style.transform = zs === 1 ? '' : `translate(${tx}px, ${ty}px) scale(${zs})`;
+    $('lbMedia').classList.toggle('zoomed', zs > 1);
+    $('lbZoom').textContent = zs > 1 ? Math.round(zs * 100) + ' %' : '';
+  }
+  /* Zoom um einen Punkt (Bildschirmkoordinaten): der Bildpunkt darunter bleibt stehen */
+  function zoomAt(nz, cx, cy) {
+    const img = $('lbMedia').querySelector('img'); if (!img) return;
+    nz = Math.min(10, Math.max(1, nz));
+    const r = img.getBoundingClientRect(), lcx = r.left + r.width / 2 - tx, lcy = r.top + r.height / 2 - ty;
+    const px = cx - lcx, py = cy - lcy;
+    tx = px - (px - tx) * nz / zs; ty = py - (py - ty) * nz / zs; zs = nz; applyZoom();
+  }
   async function showLB() {
     const r = S.cur[S.li], m = $('lbMedia');
     if (lbUrl) { URL.revokeObjectURL(lbUrl); lbUrl = null; }
-    m.innerHTML = '';
+    m.innerHTML = ''; zs = 1; tx = 0; ty = 0; applyZoom(); $('lbZoom').textContent = '';
     const d = new Date(r.t), pl = r.lat != null ? Geo.place(r.lat, r.lon) : null;
     $('lbInfo').textContent = `${S.li + 1} von ${fmt(S.cur.length)} · ${Group.WD[d.getUTCDay()].slice(0, 2)}, ${d.getUTCDate()}. ${Group.MON[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}${r.tSrc === 'datei' ? ' (Datum der Datei, keine Aufnahmezeit)' : ''}${pl ? ' · ' + pl.name : ''}`;
-    $('lbPath').textContent = r.path;
+    $('lbPath').innerHTML = r.folder ? `<button type="button" class="fchip" data-lbfolder="${esc(r.folder)}">Ordner ${esc(r.folder)} öffnen</button> <span>${esc(r.name)}</span>` : `<span>${esc(r.name)}</span>`;
     const want = S.li, file = await getFile(r.path);
     if (want !== S.li) return;
     if (!file) {
       const u = await Thumbs.url(r);
-      m.innerHTML = u ? `<img alt="">` : '<p class="err">Kein Zugriff auf den Ordner. Oben auf „Ordner freigeben“ klicken.</p>';
+      m.innerHTML = u ? `<img alt="" draggable="false">` : '<p class="err">Kein Zugriff auf den Ordner. Oben auf „Ordner freigeben“ klicken.</p>';
       if (u) m.firstChild.src = u; return;
     }
     lbUrl = URL.createObjectURL(file);
@@ -341,12 +420,27 @@ const App = (() => {
       v.onerror = () => { m.innerHTML = '<p class="err">Chrome kann dieses Videoformat nicht abspielen. Häufige Ursachen: H.265/HEVC ohne passende Windows-Erweiterung, AVI oder ältere Formate. Der Pfad unten lässt sich kopieren, um die Datei im Explorer zu öffnen.</p>'; };
       m.appendChild(v);
     } else {
-      const img = document.createElement('img'); img.alt = ''; img.decoding = 'async'; img.src = lbUrl; m.appendChild(img);
+      const img = document.createElement('img'); img.alt = ''; img.decoding = 'async'; img.draggable = false; img.src = lbUrl; m.appendChild(img);
     }
   }
-  function openLB(c) { S.li = c; $('lb').hidden = false; showLB(); $('lbClose').focus(); }
+  function openLB(c) { S.li = c; history.pushState({ v: view, lb: true }, ''); $('lb').hidden = false; showLB(); $('lbClose').focus(); }
   function closeLB() { $('lb').hidden = true; $('lbMedia').innerHTML = ''; if (lbUrl) { URL.revokeObjectURL(lbUrl); lbUrl = null; } }
   const stepLB = d => { S.li = (S.li + d + S.cur.length) % S.cur.length; showLB(); };
+  function wireLB() {
+    const m = $('lbMedia'); let pan = null, moved = false;
+    m.addEventListener('wheel', e => { if (!m.querySelector('img')) return; e.preventDefault(); zoomAt(zs * Math.exp(-e.deltaY * (e.deltaMode === 1 ? 40 : 1) * 0.002), e.clientX, e.clientY); }, { passive: false });
+    m.addEventListener('dblclick', e => { if (zs > 1) { zs = 1; applyZoom(); } else zoomAt(2.5, e.clientX, e.clientY); });
+    m.addEventListener('pointerdown', e => { if (zs <= 1 || e.button !== 0) return; e.preventDefault(); pan = { x: e.clientX, y: e.clientY }; moved = false; m.setPointerCapture(e.pointerId); m.classList.add('panning'); });
+    m.addEventListener('pointermove', e => { if (!pan) return; tx += e.clientX - pan.x; ty += e.clientY - pan.y; pan = { x: e.clientX, y: e.clientY }; moved = true; applyZoom(); });
+    const end = () => { pan = null; m.classList.remove('panning'); };
+    m.addEventListener('pointerup', end); m.addEventListener('pointercancel', end);
+    $('lbPath').addEventListener('click', e => {
+      const b = e.target.closest('[data-lbfolder]'); if (!b) return;
+      const v = { t: 'folder', f: b.dataset.lbfolder };
+      history.replaceState({ v }, ''); closeLB(); showView(v); // ersetzt die Grossansicht im Verlauf
+    });
+    void moved;
+  }
 
   /* ---------- Einstellungen ---------- */
   async function openSettings() {
@@ -386,6 +480,7 @@ const App = (() => {
     }, { passive: false });
     wireDrag(track);
     $('stage').addEventListener('click', ev => {
+      const cf = ev.target.closest('[data-cf]'); if (cf) { const e = S.events[+cf.dataset.cf], m = new Map(); e.items.forEach(i => m.set(i.folder, (m.get(i.folder) || 0) + 1)); return openFolder([...m].sort((a, b) => b[1] - a[1])[0][0]); }
       const c = ev.target.closest('.card'); if (c) return openEvent(+c.dataset.i);
       const y = ev.target.closest('.ymark'); if (y) openYear(y.dataset.y);
     });
@@ -396,16 +491,18 @@ const App = (() => {
     });
     let tileW = 130;
     $('lbody').addEventListener('wheel', ev => { if (!ev.ctrlKey) return; ev.preventDefault(); tileW = Math.min(420, Math.max(70, tileW * Math.exp(-ev.deltaY * 0.0015))); $('lbody').style.setProperty('--tile', tileW + 'px'); }, { passive: false });
-    $('back').onclick = closeLayer; $('rename').onclick = startRename;
+    $('back').onclick = back; $('rename').onclick = startRename; wireLB();
+    $('openFolders').onclick = () => go({ t: 'folders' });
+    $('lFolders').addEventListener('click', ev => { const b = ev.target.closest('[data-folder]'); if (b) openFolder(b.dataset.folder); });
     $('lEdit').addEventListener('keydown', e => { if (e.key === 'Enter') endRename(true); if (e.key === 'Escape') { e.stopPropagation(); endRename(false); } });
     $('lEdit').addEventListener('blur', () => endRename(true));
-    $('daybar').addEventListener('click', ev => { const b = ev.target.closest('button'); if (!b) return; const t = $(b.dataset.d !== undefined ? 'day' + b.dataset.d : 'ev' + b.dataset.ev); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
-    $('lbody').addEventListener('click', ev => { const o = ev.target.closest('[data-open]'); if (o) return openEvent(+o.dataset.open); const t = ev.target.closest('[data-c]'); if (t) openLB(+t.dataset.c); });
-    $('lbClose').onclick = closeLB; $('lbPrev').onclick = () => stepLB(-1); $('lbNext').onclick = () => stepLB(1);
+    $('daybar').addEventListener('click', ev => { const b = ev.target.closest('button'); if (!b) return; const t = $(b.dataset.g !== undefined ? 'g' + b.dataset.g : 'ev' + b.dataset.ev); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+    $('lbody').addEventListener('click', ev => { const o = ev.target.closest('[data-open]'); if (o) return openEvent(+o.dataset.open); const fo = ev.target.closest('[data-folder]'); if (fo) return openFolder(fo.dataset.folder); const t = ev.target.closest('[data-c]'); if (t) openLB(+t.dataset.c); });
+    $('lbClose').onclick = back; $('lbPrev').onclick = () => stepLB(-1); $('lbNext').onclick = () => stepLB(1);
     document.addEventListener('keydown', ev => {
-      if (ev.key === 'Enter' && ev.target.matches && ev.target.matches('.card,[data-c]')) { ev.target.click(); return; }
-      if (!$('lb').hidden) { if (ev.key === 'Escape') closeLB(); else if (ev.key === 'ArrowRight') stepLB(1); else if (ev.key === 'ArrowLeft') stepLB(-1); return; }
-      if (!$('layer').hidden) { if (ev.key === 'Escape') closeLayer(); return; }
+      if (ev.key === 'Enter' && ev.target.matches && ev.target.matches('.card,[data-c],[data-cf]')) { ev.target.click(); return; }
+      if (!$('lb').hidden) { if (ev.key === 'Escape') back(); else if (ev.key === '+') zoomAt(zs * 1.25, innerWidth / 2, innerHeight / 2); else if (ev.key === '-') zoomAt(zs / 1.25, innerWidth / 2, innerHeight / 2); else if (ev.key === 'ArrowRight') stepLB(1); else if (ev.key === 'ArrowLeft') stepLB(-1); return; }
+      if (!$('layer').hidden) { if (ev.key === 'Escape') back(); return; }
       if (!$('app').hidden && $('settings').open === false) { if (ev.key === 'ArrowRight') track.scrollBy({ left: 400, behavior: 'smooth' }); if (ev.key === 'ArrowLeft') track.scrollBy({ left: -400, behavior: 'smooth' }); if (ev.key === '+') setZoom(Z * 1.15, track.clientWidth / 2); if (ev.key === '-') setZoom(Z / 1.15, track.clientWidth / 2); }
     });
     $('openSettings').onclick = openSettings;
@@ -422,7 +519,7 @@ const App = (() => {
 
   /* ---------- Start ---------- */
   async function init() {
-    wire();
+    history.replaceState(null, ''); wire();
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
     if (!supported) {
       $('pick').hidden = true; $('fallbackWrap').hidden = false;

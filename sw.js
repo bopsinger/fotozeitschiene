@@ -1,5 +1,5 @@
 /* Hält die App-Dateien offline bereit. Fotos werden hier nie gespeichert. */
-const V = 'zeitschiene-v2';
+const V = 'zeitschiene-v3';
 const FILES = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
   'js/store.js', 'js/meta.js', 'js/geo.js', 'js/group.js', 'js/thumbs.js', 'js/app.js', 'js/cities.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
